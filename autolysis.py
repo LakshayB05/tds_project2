@@ -7,7 +7,6 @@
 #   "matplotlib",
 #   "numpy",
 #   "tabulate",
-#   "requests",
 # ]
 # ///
 
@@ -53,8 +52,8 @@ def analyze_csv(filename):
     missing_values = data.isnull().sum().to_dict()
 
     # Prepare for visualizations
-    image_paths = []
     correlation_matrix = None
+    correlation_image = None
 
     # Check for numeric columns before proceeding
     numeric_cols = data.select_dtypes(include=['float64', 'int64'])
@@ -62,7 +61,7 @@ def analyze_csv(filename):
     if numeric_cols.empty:
         print("Warning: No numeric columns found in the dataset. Skipping correlation analysis, boxplot, and heatmaps.")
     else:
-        # 1. Correlation Heatmap
+        # Correlation Heatmap
         try:
             plt.figure(figsize=(5, 5))  # Set the size to 512x512 px (5x5 inches)
             correlation_matrix = numeric_cols.corr()  # Compute correlation matrix only for numeric columns
@@ -70,34 +69,9 @@ def analyze_csv(filename):
             plt.title(f"Correlation Heatmap: {dataset_name}")
             correlation_image = f"{dataset_name}_correlation_heatmap.png"
             plt.savefig(correlation_image, dpi=150, bbox_inches="tight")
-            image_paths.append(correlation_image)
             plt.close()
         except Exception as e:
             print(f"Error generating correlation heatmap: {e}")
-
-        # 2. Missing Values Heatmap
-        try:
-            plt.figure(figsize=(5, 5))  # Ensure 512x512 px
-            sns.heatmap(data.isnull(), cbar=False, cmap="viridis")
-            plt.title(f"Missing Values Heatmap: {dataset_name}")
-            missing_values_image = f"{dataset_name}_missing_values_heatmap.png"
-            plt.savefig(missing_values_image, dpi=150, bbox_inches="tight")
-            image_paths.append(missing_values_image)
-            plt.close()
-        except Exception as e:
-            print(f"Error generating missing values heatmap: {e}")
-
-        # 3. Boxplot
-        try:
-            plt.figure(figsize=(5, 5))  # Ensure 512x512 px
-            sns.boxplot(data=numeric_cols.dropna())
-            plt.title(f"Boxplot: {dataset_name}")
-            boxplot_image = f"{dataset_name}_boxplot.png"
-            plt.savefig(boxplot_image, dpi=150, bbox_inches="tight")
-            image_paths.append(boxplot_image)
-            plt.close()
-        except Exception as e:
-            print(f"Error generating boxplot: {e}")
 
     try:
         # Optimized detailed prompt for AI generation
@@ -108,10 +82,7 @@ def analyze_csv(filename):
         **Missing Values:** {missing_values}
         **Correlation Matrix:** {correlation_matrix.to_dict() if correlation_matrix is not None else 'N/A'}
 
-        **Key Visual Insights:**
-        1. **Correlation Heatmap**: Displays relationships between variables.
-        2. **Missing Values Heatmap**: Highlights gaps in data.
-        3. **Boxplot**: Identifies potential outliers and variable distributions.
+        ![Correlation Heatmap]({os.path.basename(correlation_image)})
 
         Write a business-focused report based on these insights:
         - Summarize key findings and any surprising trends.
@@ -157,9 +128,6 @@ def analyze_csv(filename):
             f.write("## Dataset Insights and Recommendations\n\n")
             f.write("### Business Report\n")
             f.write(story)
-            f.write("\n\n### Visualizations\n")
-            for img_path in image_paths:
-                f.write(f"![{os.path.basename(img_path)}]({os.path.basename(img_path)})\n")
 
         print(f"Analysis complete for {dataset_name}. Outputs saved in the current directory.")
     except Exception as e:
