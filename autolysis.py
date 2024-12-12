@@ -31,17 +31,13 @@ if not AIPROXY_TOKEN:
 url = "https://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
 
 def detect_encoding(file_path):
-    """
-    Detect file encoding to handle diverse datasets gracefully.
-    """
+    """Detect file encoding to handle diverse datasets gracefully."""
     with open(file_path, 'rb') as f:
         result = chardet.detect(f.read())
     return result.get('encoding', 'utf-8')
 
 def calculate_advanced_statistics(data):
-    """
-    Calculate advanced statistics such as skewness and kurtosis for numeric columns.
-    """
+    """Calculate advanced statistics like skewness and kurtosis."""
     numeric_cols = data.select_dtypes(include=['float64', 'int64'])
     if numeric_cols.empty:
         return "No numeric columns found."
@@ -51,9 +47,7 @@ def calculate_advanced_statistics(data):
     }
 
 def create_visualizations(data, dataset_name):
-    """
-    Generate key visualizations and return paths to the saved images.
-    """
+    """Generate visualizations and save image files."""
     image_paths = []
     numeric_cols = data.select_dtypes(include=['float64', 'int64'])
 
@@ -88,9 +82,7 @@ def create_visualizations(data, dataset_name):
     return image_paths
 
 def generate_prompt(data_summary, stats, correlation_matrix, dataset_name):
-    """
-    Generate a context-rich prompt for the LLM.
-    """
+    """Generate a context-rich prompt for the LLM."""
     return f"""
     Below is the analysis summary for the dataset {dataset_name}:
 
@@ -118,9 +110,7 @@ def generate_prompt(data_summary, stats, correlation_matrix, dataset_name):
     """
 
 def call_llm(prompt):
-    """
-    Make an API call to the LLM with the generated prompt.
-    """
+    """Make an API call to the LLM with the generated prompt."""
     data_for_api = {
         "model": "gpt-4o-mini",
         "messages": [{"role": "user", "content": prompt}],
@@ -138,9 +128,7 @@ def call_llm(prompt):
         sys.exit(1)
 
 def analyze_csv(filename):
-    """
-    Main function to analyze the dataset and integrate LLM for insights.
-    """
+    """Main function to analyze the dataset and integrate LLM for insights."""
     # Load dataset
     encoding = detect_encoding(filename)
     data = pd.read_csv(filename, encoding=encoding)
@@ -163,7 +151,7 @@ def analyze_csv(filename):
     narrative = call_llm(prompt)
 
     # Save results to README
-    with open("README.md", "w") as f:
+    with open("README.md", "w", encoding="utf-8") as f:
         f.write(f"# Analysis of {dataset_name}\n\n")
         f.write("## Insights and Recommendations\n\n")
         f.write("### Business Report\n")
