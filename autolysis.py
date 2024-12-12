@@ -36,7 +36,7 @@ def detect_encoding(file_path):
     """
     with open(file_path, 'rb') as f:
         result = chardet.detect(f.read())
-    return result['encoding']
+    return result.get('encoding', 'utf-8')
 
 def calculate_advanced_statistics(data):
     """
@@ -60,12 +60,12 @@ def create_visualizations(data, dataset_name):
     # Correlation Heatmap
     if not numeric_cols.empty:
         try:
-            plt.figure(figsize=(5, 5))
+            plt.figure(figsize=(8, 8))
             correlation_matrix = numeric_cols.corr()
-            sns.heatmap(correlation_matrix, annot=True, cmap="coolwarm")
-            plt.title(f"Correlation Heatmap: {dataset_name}")
-            plt.xlabel("Features")
-            plt.ylabel("Features")
+            sns.heatmap(correlation_matrix, annot=True, cmap="coolwarm", square=True)
+            plt.title(f"Correlation Heatmap: {dataset_name}", fontsize=14)
+            plt.xlabel("Features", fontsize=12)
+            plt.ylabel("Features", fontsize=12)
             correlation_image = f"{dataset_name}_correlation_heatmap.png"
             plt.savefig(correlation_image, dpi=150, bbox_inches="tight")
             image_paths.append(correlation_image)
@@ -75,9 +75,9 @@ def create_visualizations(data, dataset_name):
 
     # Missing Values Heatmap
     try:
-        plt.figure(figsize=(5, 5))
+        plt.figure(figsize=(8, 5))
         sns.heatmap(data.isnull(), cbar=False, cmap="viridis")
-        plt.title(f"Missing Values Heatmap: {dataset_name}")
+        plt.title(f"Missing Values Heatmap: {dataset_name}", fontsize=14)
         missing_values_image = f"{dataset_name}_missing_values_heatmap.png"
         plt.savefig(missing_values_image, dpi=150, bbox_inches="tight")
         image_paths.append(missing_values_image)
@@ -94,9 +94,20 @@ def generate_prompt(data_summary, stats, correlation_matrix, dataset_name):
     return f"""
     Below is the analysis summary for the dataset {dataset_name}:
 
-    **Summary Statistics:** {data_summary}
-    **Advanced Statistics:** {stats}
-    **Correlation Matrix:** {correlation_matrix}
+    **Summary Statistics:**
+    ```json
+    {data_summary}
+    ```
+
+    **Advanced Statistics:**
+    ```json
+    {stats}
+    ```
+
+    **Correlation Matrix:**
+    ```json
+    {correlation_matrix}
+    ```
 
     Key Insights:
     - Describe relationships, gaps, and trends in the dataset.
@@ -139,11 +150,13 @@ def analyze_csv(filename):
     data_summary = data.describe(include='all').to_dict()
     missing_values = data.isnull().sum().to_dict()
     advanced_stats = calculate_advanced_statistics(data)
-    correlation_matrix = data.corr().to_dict() if not data.empty else "N/A"
+    numeric_cols = data.select_dtypes(include=['float64', 'int64'])
+    correlation_matrix = (
+        numeric_cols.corr().to_dict() if not numeric_cols.empty else "N/A"
+    )
 
     # Create visualizations
     image_paths = create_visualizations(data, dataset_name)
-    selected_image = image_paths[0] if image_paths else None
 
     # Generate prompt and call LLM
     prompt = generate_prompt(data_summary, advanced_stats, correlation_matrix, dataset_name)
