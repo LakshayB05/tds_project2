@@ -1,3 +1,18 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = [
+#   "pandas",
+#   "seaborn",
+#   "matplotlib",
+#   "numpy",
+#   "scipy",
+#   "openai",
+#   "scikit-learn",
+#   "requests",
+#   "ipykernel",  # Added ipykernel
+# ]
+# ///
+
 import os
 import pandas as pd
 import numpy as np
