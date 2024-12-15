@@ -1,207 +1,195 @@
-# /// script
-# requires-python = ">=3.9"
-# dependencies = [
-#   "pandas",
-#   "seaborn",
-#   "matplotlib",
-#   "numpy",
-#   "scipy",
-#   "openai",
-#   "scikit-learn",
-#   "requests",
-#   "ipykernel",  # Added ipykernel
-# ]
-# ///
-
 import os
 import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-import argparse
 import requests
 import json
-import openai  # Ensure installation: pip install openai
 
-# Function to load the dataset with flexible encoding
-def load_dataset(file_path):
-    print("Loading dataset with flexible encoding...")  # Debugging line
-    try:
-        data = pd.read_csv(file_path, encoding='utf-8')
-        print(f"Dataset loaded successfully with UTF-8 encoding!")  # Debugging line
-    except UnicodeDecodeError:
-        try:
-            data = pd.read_csv(file_path, encoding='ISO-8859-1')
-            print(f"Dataset loaded successfully with ISO-8859-1 encoding!")  # Debugging line
-        except Exception as e:
-            print(f"Error loading dataset: {e}")
-            raise
-    return data
+# Function to analyze the data (basic summary stats, missing values, correlation matrix)
+def analyze_data(df):
+    print("Analyzing the data...")  # Debugging line
+    # Summary statistics for numerical columns
+    summary_stats = df.describe()
 
-# Function to analyze the dataset (summary stats, missing values, correlations)
-def perform_data_analysis(data):
-    print("Performing data analysis...")  # Debugging line
-    summary = data.describe()
-    missing = data.isnull().sum()
-    
-    # Ensure numeric conversion for correlation calculation
-    numeric_data = data.select_dtypes(include=[np.number])
-    for column in data.columns:
-        if column not in numeric_data.columns:
-            data[column] = pd.to_numeric(data[column], errors='coerce')
-    numeric_data = data.select_dtypes(include=[np.number])
+    # Check for missing values
+    missing_values = df.isnull().sum()
 
-    correlations = numeric_data.corr() if not numeric_data.empty else pd.DataFrame()
-    print("Data analysis completed.")  # Debugging line
-    return summary, missing, correlations
+    # Select only numeric columns for correlation matrix
+    numeric_df = df.select_dtypes(include=[np.number])
 
-# Function to detect anomalies using the IQR method
-def identify_anomalies(data):
-    print("Identifying anomalies...")  # Debugging line
-    numeric_data = data.select_dtypes(include=[np.number])
-    Q1 = numeric_data.quantile(0.25)
-    Q3 = numeric_data.quantile(0.75)
+    # Correlation matrix for numerical columns
+    corr_matrix = numeric_df.corr() if not numeric_df.empty else pd.DataFrame()
+
+    print("Data analysis complete.")  # Debugging line
+    return summary_stats, missing_values, corr_matrix
+
+# Function to detect outliers using the IQR method
+def detect_outliers(df):
+    print("Detecting outliers...")  # Debugging line
+    # Select only numeric columns
+    df_numeric = df.select_dtypes(include=[np.number])
+
+    # Apply the IQR method to find outliers in the numeric columns
+    Q1 = df_numeric.quantile(0.25)
+    Q3 = df_numeric.quantile(0.75)
     IQR = Q3 - Q1
-    anomalies = ((numeric_data < (Q1 - 1.5 * IQR)) | (numeric_data > (Q3 + 1.5 * IQR))).sum()
-    print("Anomaly identification completed.")  # Debugging line
-    return anomalies
+    outliers = ((df_numeric < (Q1 - 1.5 * IQR)) | (df_numeric > (Q3 + 1.5 * IQR))).sum()
 
-# Function to produce visualizations (heatmap, anomaly plot, distribution)
-def generate_charts(corr_matrix, anomalies, data, save_dir):
-    print("Creating visualizations...")  # Debugging line
-    if not corr_matrix.empty:
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
-        plt.title('Correlation Matrix')
-        heatmap_path = os.path.join(save_dir, 'correlation_matrix.png')
-        plt.savefig(heatmap_path)
-        plt.close()
-    else:
-        heatmap_path = None
+    print("Outliers detection complete.")  # Debugging line
+    return outliers
 
-    if not anomalies.empty and anomalies.sum() > 0:
+# Function to generate visualizations (correlation heatmap, outliers plot, and distribution plot)
+def visualize_data(corr_matrix, outliers, df, output_dir):
+    print("Generating visualizations...")  # Debugging line
+    # Generate a heatmap for the correlation matrix
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+    plt.title('Correlation Matrix')
+    heatmap_file = os.path.join(output_dir, 'correlation_matrix.png')
+    plt.savefig(heatmap_file)
+    plt.close()
+
+    # Check if there are outliers to plot
+    if not outliers.empty and outliers.sum() > 0:
+        # Plot the outliers
         plt.figure(figsize=(10, 6))
-        anomalies.plot(kind='bar', color='red')
-        plt.title('Anomaly Detection')
-        anomaly_plot_path = os.path.join(save_dir, 'anomalies.png')
-        plt.savefig(anomaly_plot_path)
+        outliers.plot(kind='bar', color='red')
+        plt.title('Outliers Detection')
+        plt.xlabel('Columns')
+        plt.ylabel('Number of Outliers')
+        outliers_file = os.path.join(output_dir, 'outliers.png')
+        plt.savefig(outliers_file)
         plt.close()
     else:
-        anomaly_plot_path = None
+        print("No outliers detected to visualize.")
+        outliers_file = None  # No file created for outliers
 
-    numeric_cols = data.select_dtypes(include=[np.number]).columns
-    if numeric_cols.size > 0:
+    # Generate a distribution plot for the first numeric column
+    numeric_columns = df.select_dtypes(include=[np.number]).columns
+    if len(numeric_columns) > 0:
+        first_numeric_column = numeric_columns[0]  # Get the first numeric column
         plt.figure(figsize=(10, 6))
-        sns.histplot(data[numeric_cols[0]], kde=True, bins=30, color='blue')
-        plt.title(f'Distribution of {numeric_cols[0]}')
-        distribution_path = os.path.join(save_dir, 'distribution_plot.png')
-        plt.savefig(distribution_path)
+        sns.histplot(df[first_numeric_column], kde=True, color='blue', bins=30)
+        plt.title(f'Distribution')
+        dist_plot_file = os.path.join(output_dir, f'distribution_.png')
+        plt.savefig(dist_plot_file)
         plt.close()
     else:
-        distribution_path = None
+        dist_plot_file = None  # No numeric columns to plot
 
-    print("Visualizations created.")  # Debugging line
-    return heatmap_path, anomaly_plot_path, distribution_path
+    print("Visualizations generated.")  # Debugging line
+    return heatmap_file, outliers_file, dist_plot_file
 
-# Function to craft the README.md report
-def compile_report(summary, missing, corr_matrix, anomalies, charts_dir):
-    print("Compiling report...")  # Debugging line
-    readme_path = os.path.join(charts_dir, 'README.md')
+# Function to generate a detailed story using the new OpenAI API through the proxy
+def question_llm(prompt, context, max_tokens=1000):
+    print("Generating story using LLM...")  # Debugging line
     try:
-        with open(readme_path, 'w') as file:
-            file.write("# Data Analysis Report\n\n")
-            file.write("## Summary\nThis report provides a detailed analysis of the dataset, exploring its structure, anomalies, and inter-variable relationships.\n\n")
-            
-            file.write("### Summary Statistics\n")
-            file.write(summary.to_markdown() + "\n\n")
+        # Get the AIPROXY_TOKEN from the environment variable
+        token = os.environ["AIPROXY_TOKEN"]
 
-            file.write("### Missing Values\n")
-            file.write(missing.to_markdown() + "\n\n")
-
-            file.write("### Correlation Matrix\n")
-            if not corr_matrix.empty:
-                file.write("![Correlation Matrix](correlation_matrix.png)\n\n")
-            else:
-                file.write("No correlations available for non-numeric data.\n\n")
-
-            file.write("### Anomalies\n")
-            if anomalies.sum() > 0:
-                file.write("![Anomalies](anomalies.png)\n\n")
-            else:
-                file.write("No significant anomalies detected.\n\n")
-
-            file.write("### Distribution\n")
-            file.write("![Distribution Plot](distribution_plot.png)\n\n")
-
-        print(f"Report compiled: {readme_path}")  # Debugging line
-        return readme_path
-    except Exception as e:
-        print(f"Error creating report: {e}")
-        return None
-
-# Function to invoke an LLM for a narrative
-def generate_narrative_via_llm(prompt, details):
-    print("Calling LLM for narrative generation...")  # Debugging line
-    token = os.getenv("AIPROXY_TOKEN")
-    if not token:
-        print("Error: AIPROXY_TOKEN not set.")
-        return "Unable to generate narrative."
-
-    try:
+        # Set the custom API base URL for the proxy
         api_url = "https://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
+
+        # Construct the full prompt
+        full_prompt = f"""
+        Based on the following data analysis, please generate a creative and engaging story. The story should include multiple paragraphs, a clear structure with an introduction, body, and conclusion, and should feel like a well-rounded narrative.
+
+        Context:
+        {context}
+
+        Data Analysis Prompt:
+        {prompt}
+
+        The story should be elaborate and cover the following:
+        - An introduction to set the context.
+        - A detailed body that expands on the data points and explores their significance.
+        - A conclusion that wraps up the analysis and presents any potential outcomes or lessons.
+        - Use transitions to connect ideas and keep the narrative flowing smoothly.
+        - Format the story with clear paragraphs and structure.
+        """
+
+        # Prepare headers
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}"
+        }
+
+        # Prepare the body with the model and prompt
         data = {
-            "model": "gpt-4o-mini",
+            "model": "gpt-4o-mini",  # Specific model for proxy
             "messages": [
                 {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": f"{prompt}\n\nContext:\n{details}"}
+                {"role": "user", "content": full_prompt}
             ],
-            "max_tokens": 1000,
+            "max_tokens": max_tokens,
             "temperature": 0.7
         }
 
-        response = requests.post(api_url, headers={"Authorization": f"Bearer {token}"}, json=data)
-        if response.status_code == 200:
-            return response.json()['choices'][0]['message']['content'].strip()
-        else:
-            print(f"LLM request error: {response.status_code}")
-            return "Narrative generation failed."
-    except Exception as e:
-        print(f"Error: {e}")
-        return "Error during narrative generation."
+        # Send the POST request to the proxy
+        response = requests.post(api_url, headers=headers, data=json.dumps(data))
 
-# Main function
-def main(file_path):
-    print("Starting data analysis process...")  # Debugging line
-    try:
-        data = load_dataset(file_path)
+        # Check for successful response
+        if response.status_code == 200:
+            # Extract the story from the response
+            story = response.json()['choices'][0]['message']['content'].strip()
+            print("Story generated.")  # Debugging line
+            return story
+        else:
+            print(f"Error with request: {response.status_code} - {response.text}")
+            return "Failed to generate story."
+
     except Exception as e:
         print(f"Error: {e}")
+        return "Failed to generate story."
+
+# Main function that integrates all the steps
+def main(csv_file):
+    print("Starting the analysis...")  # Debugging line
+
+    # Try reading the CSV file with 'ISO-8859-1' encoding to handle special characters
+    try:
+        df = pd.read_csv(csv_file, encoding='ISO-8859-1')
+        print("Dataset loaded successfully!")  # Debugging line
+    except UnicodeDecodeError as e:
+        print(f"Error reading file: {e}")
         return
 
-    summary, missing, corr_matrix = perform_data_analysis(data)
-    anomalies = identify_anomalies(data)
+    summary_stats, missing_values, corr_matrix = analyze_data(df)
+    outliers = detect_outliers(df)
 
     output_dir = "."
     os.makedirs(output_dir, exist_ok=True)
 
-    heatmap, anomalies_chart, distribution = generate_charts(corr_matrix, anomalies, data, output_dir)
+    # Visualize the data
+    heatmap_file, outliers_file, dist_plot_file = visualize_data(corr_matrix, outliers, df, output_dir)
 
-    narrative = generate_narrative_via_llm(
-        "Write a detailed analysis story based on the dataset.", 
-        details=f"Summary: {summary}\nMissing: {missing}\nAnomalies: {anomalies}"
-    )
+    # Limit the context size for the LLM to ensure it fits within 1000 tokens
+    context_summary = f"""
+    Dataset Analysis:
+    Summary Statistics (First 5 columns):
+    {summary_stats.iloc[:, :5]}
 
-    report_path = compile_report(summary, missing, corr_matrix, anomalies, output_dir)
-    if report_path:
-        with open(report_path, 'a') as report:
-            report.write("## Narrative\n")
-            report.write(narrative)
+    Missing Values:
+    {missing_values.head()}
 
-    print("Data analysis completed successfully!")
+    Correlation Matrix (First 5 columns):
+    {corr_matrix.iloc[:, :5]}
+
+    Outliers (First 5 columns):
+    {outliers.head()}
+    """
+
+    # Generate the story using the LLM
+    story = question_llm("Generate a nice and creative story from the analysis", 
+                         context=context_summary, 
+                         max_tokens=1000)
+
+    print(f"Generated Story:\n{story}")
 
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("Usage: python script.py <dataset.csv>")
+        print("Usage: python script.py <dataset_path>")
         sys.exit(1)
     main(sys.argv[1])
