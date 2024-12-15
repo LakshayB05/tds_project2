@@ -1,169 +1,205 @@
-# /// script
+# requires-python = ">=3.9"
 # dependencies = [
-#   "httpx",
 #   "pandas",
 #   "seaborn",
-#   "scipy",
 #   "matplotlib",
 #   "numpy",
-#   "chardet",
-#   "tabulate",
+#   "scipy",
+#   "openai",
+#   "scikit-learn",
 #   "requests",
+#   "ipykernel",  # Added ipykernel
 # ]
-# ///
 
 import os
-import sys
 import pandas as pd
+import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+import argparse
 import requests
-import chardet
-from scipy.stats import skew, kurtosis
+import json
+import openai  # Ensure installation: pip install openai
 
-# Load AIPROXY_TOKEN from environment variable
-AIPROXY_TOKEN = os.getenv('AIPROXY_TOKEN')
-if not AIPROXY_TOKEN:
-    print("Error: AIPROXY_TOKEN environment variable not set.")
-    sys.exit(1)
-
-# API endpoint for OpenAI proxy
-url = "https://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
-
-def detect_encoding(file_path):
-    """Detect file encoding to handle diverse datasets gracefully."""
-    with open(file_path, 'rb') as f:
-        result = chardet.detect(f.read())
-    return result.get('encoding', 'utf-8')
-
-def calculate_advanced_statistics(data):
-    """Calculate advanced statistics like skewness and kurtosis."""
-    numeric_cols = data.select_dtypes(include=['float64', 'int64'])
-    if numeric_cols.empty:
-        return "No numeric columns found."
-    return {
-        "Skewness": numeric_cols.apply(skew).to_dict(),
-        "Kurtosis": numeric_cols.apply(kurtosis).to_dict(),
-    }
-
-def create_visualizations(data, dataset_name):
-    """Generate visualizations and save image files."""
-    image_paths = []
-    numeric_cols = data.select_dtypes(include=['float64', 'int64'])
-
-    # Correlation Heatmap
-    if not numeric_cols.empty:
-        try:
-            plt.figure(figsize=(8, 8))
-            correlation_matrix = numeric_cols.corr()
-            sns.heatmap(correlation_matrix, annot=True, cmap="coolwarm", square=True)
-            plt.title(f"Correlation Heatmap: {dataset_name}", fontsize=14)
-            plt.xlabel("Features", fontsize=12)
-            plt.ylabel("Features", fontsize=12)
-            correlation_image = f"{dataset_name}_correlation_heatmap.png"
-            plt.savefig(correlation_image, dpi=150, bbox_inches="tight")
-            image_paths.append(correlation_image)
-            plt.close()
-        except Exception as e:
-            print(f"Error generating correlation heatmap: {e}")
-
-    # Missing Values Heatmap
+# Function to load the dataset with flexible encoding
+def load_dataset(file_path):
+    print("Loading dataset with flexible encoding...")  # Debugging line
     try:
-        plt.figure(figsize=(8, 5))
-        sns.heatmap(data.isnull(), cbar=False, cmap="viridis")
-        plt.title(f"Missing Values Heatmap: {dataset_name}", fontsize=14)
-        missing_values_image = f"{dataset_name}_missing_values_heatmap.png"
-        plt.savefig(missing_values_image, dpi=150, bbox_inches="tight")
-        image_paths.append(missing_values_image)
+        data = pd.read_csv(file_path, encoding='utf-8')
+        print(f"Dataset loaded successfully with UTF-8 encoding!")  # Debugging line
+    except UnicodeDecodeError:
+        try:
+            data = pd.read_csv(file_path, encoding='ISO-8859-1')
+            print(f"Dataset loaded successfully with ISO-8859-1 encoding!")  # Debugging line
+        except Exception as e:
+            print(f"Error loading dataset: {e}")
+            raise
+    return data
+
+# Function to analyze the dataset (summary stats, missing values, correlations)
+def perform_data_analysis(data):
+    print("Performing data analysis...")  # Debugging line
+    summary = data.describe()
+    missing = data.isnull().sum()
+    
+    # Ensure numeric conversion for correlation calculation
+    numeric_data = data.select_dtypes(include=[np.number])
+    for column in data.columns:
+        if column not in numeric_data.columns:
+            data[column] = pd.to_numeric(data[column], errors='coerce')
+    numeric_data = data.select_dtypes(include=[np.number])
+
+    correlations = numeric_data.corr() if not numeric_data.empty else pd.DataFrame()
+    print("Data analysis completed.")  # Debugging line
+    return summary, missing, correlations
+
+# Function to detect anomalies using the IQR method
+def identify_anomalies(data):
+    print("Identifying anomalies...")  # Debugging line
+    numeric_data = data.select_dtypes(include=[np.number])
+    Q1 = numeric_data.quantile(0.25)
+    Q3 = numeric_data.quantile(0.75)
+    IQR = Q3 - Q1
+    anomalies = ((numeric_data < (Q1 - 1.5 * IQR)) | (numeric_data > (Q3 + 1.5 * IQR))).sum()
+    print("Anomaly identification completed.")  # Debugging line
+    return anomalies
+
+# Function to produce visualizations (heatmap, anomaly plot, distribution)
+def generate_charts(corr_matrix, anomalies, data, save_dir):
+    print("Creating visualizations...")  # Debugging line
+    if not corr_matrix.empty:
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+        plt.title('Correlation Matrix')
+        heatmap_path = os.path.join(save_dir, 'correlation_matrix.png')
+        plt.savefig(heatmap_path)
         plt.close()
-    except Exception as e:
-        print(f"Error generating missing values heatmap: {e}")
-
-    return image_paths
-
-def generate_prompt(data_summary, stats, correlation_matrix, dataset_name):
-    """Generate a context-rich prompt for the LLM."""
-    return f"""
-    Below is the analysis summary for the dataset {dataset_name}:
-
-    **Summary Statistics:**
-    ```json
-    {data_summary}
-    ```
-
-    **Advanced Statistics:**
-    ```json
-    {stats}
-    ```
-
-    **Correlation Matrix:**
-    ```json
-    {correlation_matrix}
-    ```
-
-    Key Insights:
-    - Describe relationships, gaps, and trends in the dataset.
-    - Recommend actions based on findings.
-    - Highlight strategic implications of these insights.
-
-    Please provide a business-focused report in Markdown format.
-    """
-
-def call_llm(prompt):
-    """Make an API call to the LLM with the generated prompt."""
-    data_for_api = {
-        "model": "gpt-4o-mini",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 1000
-    }
-    response = requests.post(url, headers={
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {AIPROXY_TOKEN}"
-    }, json=data_for_api)
-
-    if response.status_code == 200:
-        return response.json()['choices'][0]['message']['content'].strip()
     else:
-        print(f"Error: {response.status_code}, {response.text}")
-        sys.exit(1)
+        heatmap_path = None
 
-def analyze_csv(filename):
-    """Main function to analyze the dataset and integrate LLM for insights."""
-    # Load dataset
-    encoding = detect_encoding(filename)
-    data = pd.read_csv(filename, encoding=encoding)
-    dataset_name = os.path.splitext(os.path.basename(filename))[0]
+    if not anomalies.empty and anomalies.sum() > 0:
+        plt.figure(figsize=(10, 6))
+        anomalies.plot(kind='bar', color='red')
+        plt.title('Anomaly Detection')
+        anomaly_plot_path = os.path.join(save_dir, 'anomalies.png')
+        plt.savefig(anomaly_plot_path)
+        plt.close()
+    else:
+        anomaly_plot_path = None
 
-    # Data summaries and statistics
-    data_summary = data.describe(include='all').to_dict()
-    missing_values = data.isnull().sum().to_dict()
-    advanced_stats = calculate_advanced_statistics(data)
-    numeric_cols = data.select_dtypes(include=['float64', 'int64'])
-    correlation_matrix = (
-        numeric_cols.corr().to_dict() if not numeric_cols.empty else "N/A"
+    numeric_cols = data.select_dtypes(include=[np.number]).columns
+    if numeric_cols.size > 0:
+        plt.figure(figsize=(10, 6))
+        sns.histplot(data[numeric_cols[0]], kde=True, bins=30, color='blue')
+        plt.title(f'Distribution of {numeric_cols[0]}')
+        distribution_path = os.path.join(save_dir, 'distribution_plot.png')
+        plt.savefig(distribution_path)
+        plt.close()
+    else:
+        distribution_path = None
+
+    print("Visualizations created.")  # Debugging line
+    return heatmap_path, anomaly_plot_path, distribution_path
+
+# Function to craft the README.md report
+def compile_report(summary, missing, corr_matrix, anomalies, charts_dir):
+    print("Compiling report...")  # Debugging line
+    readme_path = os.path.join(charts_dir, 'README.md')
+    try:
+        with open(readme_path, 'w') as file:
+            file.write("# Data Analysis Report\n\n")
+            file.write("## Summary\nThis report provides a detailed analysis of the dataset, exploring its structure, anomalies, and inter-variable relationships.\n\n")
+            
+            file.write("### Summary Statistics\n")
+            file.write(summary.to_markdown() + "\n\n")
+
+            file.write("### Missing Values\n")
+            file.write(missing.to_markdown() + "\n\n")
+
+            file.write("### Correlation Matrix\n")
+            if not corr_matrix.empty:
+                file.write("![Correlation Matrix](correlation_matrix.png)\n\n")
+            else:
+                file.write("No correlations available for non-numeric data.\n\n")
+
+            file.write("### Anomalies\n")
+            if anomalies.sum() > 0:
+                file.write("![Anomalies](anomalies.png)\n\n")
+            else:
+                file.write("No significant anomalies detected.\n\n")
+
+            file.write("### Distribution\n")
+            file.write("![Distribution Plot](distribution_plot.png)\n\n")
+
+        print(f"Report compiled: {readme_path}")  # Debugging line
+        return readme_path
+    except Exception as e:
+        print(f"Error creating report: {e}")
+        return None
+
+# Function to invoke an LLM for a narrative
+def generate_narrative_via_llm(prompt, details):
+    print("Calling LLM for narrative generation...")  # Debugging line
+    token = os.getenv("AIPROXY_TOKEN")
+    if not token:
+        print("Error: AIPROXY_TOKEN not set.")
+        return "Unable to generate narrative."
+
+    try:
+        api_url = "https://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
+        data = {
+            "model": "gpt-4o-mini",
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": f"{prompt}\n\nContext:\n{details}"}
+            ],
+            "max_tokens": 1000,
+            "temperature": 0.7
+        }
+
+        response = requests.post(api_url, headers={"Authorization": f"Bearer {token}"}, json=data)
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content'].strip()
+        else:
+            print(f"LLM request error: {response.status_code}")
+            return "Narrative generation failed."
+    except Exception as e:
+        print(f"Error: {e}")
+        return "Error during narrative generation."
+
+# Main function
+def main(file_path):
+    print("Starting data analysis process...")  # Debugging line
+    try:
+        data = load_dataset(file_path)
+    except Exception as e:
+        print(f"Error: {e}")
+        return
+
+    summary, missing, corr_matrix = perform_data_analysis(data)
+    anomalies = identify_anomalies(data)
+
+    output_dir = "."
+    os.makedirs(output_dir, exist_ok=True)
+
+    heatmap, anomalies_chart, distribution = generate_charts(corr_matrix, anomalies, data, output_dir)
+
+    narrative = generate_narrative_via_llm(
+        "Write a detailed analysis story based on the dataset.", 
+        details=f"Summary: {summary}\nMissing: {missing}\nAnomalies: {anomalies}"
     )
 
-    # Create visualizations
-    image_paths = create_visualizations(data, dataset_name)
+    report_path = compile_report(summary, missing, corr_matrix, anomalies, output_dir)
+    if report_path:
+        with open(report_path, 'a') as report:
+            report.write("## Narrative\n")
+            report.write(narrative)
 
-    # Generate prompt and call LLM
-    prompt = generate_prompt(data_summary, advanced_stats, correlation_matrix, dataset_name)
-    narrative = call_llm(prompt)
-
-    # Save results to README
-    with open("README.md", "w", encoding="utf-8") as f:
-        f.write(f"# Analysis of {dataset_name}\n\n")
-        f.write("## Insights and Recommendations\n\n")
-        f.write("### Business Report\n")
-        f.write(narrative)
-        f.write("\n\n### Visualizations\n")
-        for img_path in image_paths:
-            f.write(f"![{os.path.basename(img_path)}]({os.path.basename(img_path)})\n")
-
-    print(f"Analysis complete for {dataset_name}. Results saved in README.md.")
+    print("Data analysis completed successfully!")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    import sys
+    if len(sys.argv) < 2:
         print("Usage: python script.py <dataset.csv>")
         sys.exit(1)
-    analyze_csv(sys.argv[1])
+    main(sys.argv[1])
